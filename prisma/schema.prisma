@@ -1,10 +1,9 @@
-// 1. Define the possible roles using an Enum for type safety
+// 1. Roles enum
 enum Role {
   STAFF
   SUPERVISOR
   ADMIN
 }
-
 
 generator client {
   provider = "prisma-client-js"
@@ -15,35 +14,39 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-
-
-// 2. The Staff model will handle all roles (staff, supervisor, admin)
+// 2. Staff model (User)
 model Staff {
   id           Int          @id @default(autoincrement())
-  name         String       @unique
-  password     String       // WARNING: Still storing plaintext, HASHING IS HIGHLY RECOMMENDED
-  role         Role         @default(STAFF) // Use the Role enum
+  name         String
   email        String       @unique
-  
-  // 3. Supervisor/Subordinate relationship
+  password     String
+  role         Role         @default(STAFF)
+
   supervisorId Int?
   supervisor   Staff?       @relation("StaffHierarchy", fields: [supervisorId], references: [id], onDelete: SetNull)
   subordinates Staff[]      @relation("StaffHierarchy")
 
-  entries      WasteEntry[]
+  pickups      Pickup[]
 }
 
-
-
-model WasteEntry {
+// 3. Pickup Model
+model Pickup {
   id        Int      @id @default(autoincrement())
   staffId   Int
+  staff     Staff    @relation(fields: [staffId], references: [id])
+
   category  String
   weight    Float
-  date      DateTime @default(now())
-  staff     Staff    @relation(fields: [staffId], references: [id])
+  co2Saved  Float
+  latitude  Float
+  longitude Float
+  imageUrl  String?
+  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([staffId])
 }
-
-
-
 

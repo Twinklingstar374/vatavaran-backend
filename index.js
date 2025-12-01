@@ -1,42 +1,60 @@
-// backend/server.js (ESM Compatible)
+// backend/index.js (ESM Compatible)
 
 import express from "express";
+import cors from "cors";
 import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
 import { PrismaClient } from "@prisma/client";
 import authRouter from "./src/routes/auth.routes.js";
+import pickupsRouter from "./src/routes/pickups.routes.js";
+import { errorHandler, notFoundHandler } from "./src/middleware/error.middleware.js";
 
-// Load environment variables
 dotenv.config();
 
-// CONSTANTS
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 4000;
 const JWT_SECRET = process.env.JWT_SECRET || "YOUR_SECRET_KEY";
 
-// Express app + Prisma
 const app = express();
 const prisma = new PrismaClient();
 
-// ===== CORS CONFIGURATION =====
-app.use((req, res, next) => {
-  const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:3000";
-  
-  res.setHeader("Access-Control-Allow-Origin", allowedOrigin);
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.setHeader("Access-Control-Allow-Credentials", "true");
+// CORS Configuration
+const corsOptions = {
+  origin: function (origin, callback) {
+    const allowedOrigins = [
+      "http://localhost:3000",
+      "https://vatavaranapp.vercel.app",
+    ];
+    
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log("Blocked origin:", origin);
+      callback(null, false);
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
 
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
+app.use(cors(corsOptions));
 
-  next();
-});
-
-// ===== JSON Body Parser =====
+// Body parsing
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// ===== AUTH MIDDLEWARE =====
+// Request logging middleware (development only)
+if (process.env.NODE_ENV === 'development') {
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`, req.body);
+    next();
+  });
+}
+
+// Auth middleware (for protected route example)
 const authMiddleware = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) return res.status(401).json({ message: "No token" });
@@ -52,11 +70,12 @@ const authMiddleware = (req, res, next) => {
   }
 };
 
-// ===== ROUTES =====
+// Routes
 app.use("/api/auth", authRouter);
+app.use("/api/pickups", pickupsRouter);
 
-// PROTECTED TEST ROUTE
-app.get("/protected", authMiddleware, async (req, res) => {
+// Protected route example
+app.get("/api/protected", authMiddleware, async (req, res) => {
   try {
     const userDetails = await prisma.staff.findUnique({
       where: { id: req.user.id },
@@ -77,12 +96,38 @@ app.get("/protected", authMiddleware, async (req, res) => {
   }
 });
 
-// HEALTH ROUTE
+// Health check
 app.get("/", (req, res) => {
-  res.send("Auth Server Running. Visit /api/auth/login or /api/auth/signup");
+  res.json({
+    success: true,
+    message: "VatavaranTrack API Server Running",
+    version: "1.0.0",
+    endpoints: {
+      auth: "/api/auth",
+      pickups: "/api/pickups"
+    }
+  });
 });
 
-// ===== START SERVER =====
+app.get("/health", (req, res) => {
+  res.json({ success: true, status: "healthy", timestamp: new Date().toISOString() });
+});
+
+// 404 handler (must be after all routes)
+app.use(notFoundHandler);
+
+// Global error handler (must be last)
+app.use(errorHandler);
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, closing server gracefully...');
+  await prisma.$disconnect();
+  process.exit(0);
+});
+
+// Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`📚 API Docs: http://localhost:${PORT}/`);
 });
