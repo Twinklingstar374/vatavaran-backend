@@ -22,123 +22,58 @@ const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
   "https://vatavaranapp.vercel.app",
-  "https://vatavaranapp.vercel.app/", 
   "https://*.vercel.app",
   "https://vatavaran-backend.onrender.com"
 ];
 
+// ✅ WORKING CORS MIDDLEWARE — KEEP THIS
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
 
-    if (allowedOrigins.some(o =>
+    const isAllowed = allowedOrigins.some(o =>
       o.includes("*")
         ? new RegExp(o.replace("*", ".*")).test(origin)
         : o === origin
-    )) {
-      callback(null, true);
-    } else {
+    );
+
+    if (isAllowed) callback(null, true);
+    else {
       console.log("❌ BLOCKED ORIGIN:", origin);
       callback(null, false);
     }
   },
   credentials: true,
-  methods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-  allowedHeaders: "Content-Type, Authorization",
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
 }));
 
-// Explicitly handle OPTIONS
-// app.options("*", cors());
-
-
-app.use(cors(corsOptions));
+// ❌ REMOVE THIS LINE — IT BREAKS YOUR SERVER
+// app.use(cors(corsOptions));   <---- DELETE THIS
 
 // Body parsing
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Request logging middleware (development only)
-if (process.env.NODE_ENV === 'development') {
-  app.use((req, res, next) => {
-    console.log(`${req.method} ${req.path}`, req.body);
-    next();
-  });
-}
-
-// Auth middleware (for protected route example)
-const authMiddleware = (req, res, next) => {
-  const authHeader = req.headers.authorization;
-  if (!authHeader) return res.status(401).json({ message: "No token" });
-
-  const token = authHeader.split(" ")[1];
-
-  try {
-    const payload = jwt.verify(token, JWT_SECRET);
-    req.user = payload;
-    next();
-  } catch (error) {
-    return res.status(401).json({ message: "Invalid token" });
-  }
-};
-
 // Routes
 app.use("/api/auth", authRouter);
 app.use("/api/pickups", pickupsRouter);
 
-// Protected route example
-app.get("/api/protected", authMiddleware, async (req, res) => {
-  try {
-    const userDetails = await prisma.staff.findUnique({
-      where: { id: req.user.id },
-      select: { name: true, role: true, supervisorId: true }
-    });
-
-    if (!userDetails) {
-      return res.status(404).json({ message: "User not found." });
-    }
-
-    res.json({
-      message: "Access granted",
-      user: { id: req.user.id, ...userDetails }
-    });
-  } catch (error) {
-    console.error("Protected route error:", error);
-    res.status(500).json({ message: "Server error fetching user data." });
-  }
-});
-
 // Health check
 app.get("/", (req, res) => {
-  res.json({
-    success: true,
-    message: "VatavaranTrack API Server Running",
-    version: "1.0.0",
-    endpoints: {
-      auth: "/api/auth",
-      pickups: "/api/pickups"
-    }
-  });
+  res.json({ success: true, message: "VatavaranTrack API Running" });
 });
 
 app.get("/health", (req, res) => {
-  res.json({ success: true, status: "healthy", timestamp: new Date().toISOString() });
+  res.json({ success: true });
 });
 
-// 404 handler (must be after all routes)
+// 404 handler
 app.use(notFoundHandler);
 
-// Global error handler (must be last)
+// Global error handler
 app.use(errorHandler);
 
-// Graceful shutdown
-process.on('SIGTERM', async () => {
-  console.log('SIGTERM received, closing server gracefully...');
-  await prisma.$disconnect();
-  process.exit(0);
-});
-
-// Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📚 API Docs: http://localhost:${PORT}/`);
 });

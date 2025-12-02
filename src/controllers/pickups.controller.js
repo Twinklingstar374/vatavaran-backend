@@ -117,15 +117,8 @@ export const getMyPickups = async (req, res) => {
       prisma.pickup.count({ where })
     ]);
 
-    return res.json({
-      pickups: items,
-      pagination: {
-        total,
-        page,
-        limit,
-        pages: Math.ceil(total / limit)
-      }
-    });
+    return res.json(items);
+
   } catch (error) {
     console.error("getMyPickups error:", error);
     return res.status(500).json({ message: "Internal server error" });
