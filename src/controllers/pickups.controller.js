@@ -1,217 +1,329 @@
-import prisma from '../services/db.service.js';
+// controllers/pickups.controller.js
+import prisma from "../services/db.service.js";
+import cloudinary from "../services/cloudinary.service.js";
 
-// Create a new pickup (Staff only)
+/* ----------------------
+   Helpers
+   ---------------------- */
+const uploadToCloudinary = (buffer) => {
+  return new Promise((resolve, reject) => {
+    cloudinary.uploader.upload_stream(
+      { folder: "vatavaran" },
+      (err, result) => err ? reject(err) : resolve(result)
+    ).end(buffer);
+  });
+};
+
+const CO2_FACTOR = {
+  PLASTIC: 1.7,
+  DRY: 0.5,
+  GREEN: 0.3,
+  OTHER: 0.2
+};
+
+const parseIntSafe = (v, fallback = null) => {
+  const n = parseInt(v);
+  return Number.isNaN(n) ? fallback : n;
+};
+
+const parseFloatSafe = (v, fallback = null) => {
+  const n = parseFloat(v);
+  return Number.isNaN(n) ? fallback : n;
+};
+
+/* ==========================================================
+   1) CREATE PICKUP (STAFF)
+   Accepts form-data with optional file (req.file.buffer)
+   Fields: category, weight, latitude, longitude, optionally image
+========================================================== */
 export const createPickup = async (req, res) => {
   try {
-    const { category, weight, latitude, longitude, imageUrl } = req.body;
-    const staffId = req.user.id;
+    const staffId = req.user && req.user.id;
+    if (!staffId) return res.status(401).json({ message: "Unauthorized" });
 
-    // Basic validation
+    let { category, weight, latitude, longitude } = req.body;
+
     if (!category || !weight || !latitude || !longitude) {
       return res.status(400).json({ message: "Missing required fields" });
     }
 
-    // Calculate CO2 saved (Example logic: 1kg waste = 0.5kg CO2 saved)
-    const co2Saved = weight * 0.5;
+    // upload image if present (req.file.buffer expected from multer)
+    let imageUrl = req.body.imageUrl || null; // Accept imageUrl from body
+    if (req.file && req.file.buffer) {
+      try {
+        const upload = await uploadToCloudinary(req.file.buffer);
+        imageUrl = upload.secure_url;
+      } catch (err) {
+        console.error("Cloudinary upload failed:", err);
+        // continue - image is optional; but inform client
+        return res.status(500).json({ message: "Image upload failed" });
+      }
+    }
+
+    const numericWeight = parseFloatSafe(weight);
+    if (numericWeight === null) return res.status(400).json({ message: "Invalid weight" });
+
+    const co2Factor = CO2_FACTOR[(category || "").toUpperCase()] ?? CO2_FACTOR.OTHER;
+    const co2Saved = numericWeight * co2Factor;
 
     const pickup = await prisma.pickup.create({
       data: {
         staffId,
         category,
-        weight: parseFloat(weight),
+        weight: numericWeight,
         co2Saved,
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
+        latitude: parseFloatSafe(latitude),
+        longitude: parseFloatSafe(longitude),
         imageUrl,
         status: "PENDING"
       }
     });
 
-    res.status(201).json({ message: "Pickup created successfully", pickup });
+    return res.status(201).json({ message: "Pickup created", pickup });
   } catch (error) {
-    console.error("Create pickup error:", error);
-    res.status(500).json({ message: "Server error creating pickup" });
+    console.error("createPickup error:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Get my pickups (Staff only)
+/* ==========================================================
+   2) GET MY PICKUPS (STAFF)
+   Supports: page, limit, sortBy, order (or sortOrder), optional category filter
+========================================================== */
 export const getMyPickups = async (req, res) => {
   try {
-    const staffId = req.user.id;
-    const { sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
-    
-    // Validate sortBy field
-    const validSortFields = ['createdAt', 'weight', 'category', 'status'];
-    const sortField = validSortFields.includes(sortBy) ? sortBy : 'createdAt';
-    const order = sortOrder === 'asc' ? 'asc' : 'desc';
-    
-    const pickups = await prisma.pickup.findMany({
-      where: { staffId },
-      orderBy: { [sortField]: order }
+    const staffId = req.user && req.user.id;
+    if (!staffId) return res.status(401).json({ message: "Unauthorized" });
+
+    const page = parseIntSafe(req.query.page, 1) || 1;
+    const limit = parseIntSafe(req.query.limit, 10) || 10;
+    const skip = (page - 1) * limit;
+
+    const sortBy = req.query.sortBy || "createdAt";
+    const order = (req.query.order || req.query.sortOrder || "desc").toLowerCase() === "asc" ? "asc" : "desc";
+
+    const where = { staffId };
+
+    if (req.query.category) where.category = { equals: req.query.category };
+    if (req.query.status) where.status = req.query.status;
+
+    const [items, total] = await Promise.all([
+      prisma.pickup.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { [sortBy]: order },
+      }),
+      prisma.pickup.count({ where })
+    ]);
+
+    return res.json({
+      pickups: items,
+      pagination: {
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit)
+      }
     });
-    
-    res.json(pickups);
   } catch (error) {
-    console.error("Get my pickups error:", error);
-    res.status(500).json({ message: "Server error fetching pickups" });
+    console.error("getMyPickups error:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Get all pickups (Supervisor/Admin) with filters and pagination
+/* ==========================================================
+   3) GET ALL PICKUPS (Supervisor/Admin)
+   Supports: page, limit, status, staffId, startDate, endDate, category, sortBy, order, search
+========================================================== */
 export const getAllPickups = async (req, res) => {
   try {
-    const { page = 1, limit = 10, status, staffId, startDate, endDate, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
-    
+    // role check should already be done in middleware (authorizeRoles)
+    const page = parseIntSafe(req.query.page, 1) || 1;
+    const limit = parseIntSafe(req.query.limit, 10) || 10;
     const skip = (page - 1) * limit;
-    const take = parseInt(limit);
+
+    const sortBy = req.query.sortBy || "createdAt";
+    const order = (req.query.order || req.query.sortOrder || "desc").toLowerCase() === "asc" ? "asc" : "desc";
 
     const where = {};
-    if (status) where.status = status;
-    if (staffId) where.staffId = parseInt(staffId);
-    if (startDate && endDate) {
-      where.createdAt = {
-        gte: new Date(startDate),
-        lte: new Date(endDate)
-      };
+
+    if (req.query.status) where.status = req.query.status;
+    if (req.query.staffId) {
+      const sId = parseIntSafe(req.query.staffId);
+      if (sId !== null) where.staffId = sId;
+    }
+    if (req.query.category) where.category = req.query.category;
+    if (req.query.search) {
+      // simple search on category or notes if you have notes field; adjust as needed
+      where.OR = [
+        { category: { contains: req.query.search, mode: "insensitive" } },
+      ];
+    }
+    if (req.query.startDate && req.query.endDate) {
+      const start = new Date(req.query.startDate);
+      const end = new Date(req.query.endDate);
+      if (!Number.isNaN(start.getTime()) && !Number.isNaN(end.getTime())) {
+        where.createdAt = { gte: start, lte: end };
+      }
     }
 
     const [pickups, total] = await prisma.$transaction([
       prisma.pickup.findMany({
         where,
         skip,
-        take,
-        orderBy: { [sortBy]: sortOrder },
-        include: { staff: { select: { name: true, email: true } } }
+        take: limit,
+        orderBy: { [sortBy]: order },
+        include: { staff: { select: { id: true, name: true, email: true } } }
       }),
       prisma.pickup.count({ where })
     ]);
 
-    res.json({
+    return res.json({
       pickups,
       pagination: {
         total,
-        page: parseInt(page),
+        page,
+        limit,
         pages: Math.ceil(total / limit)
       }
     });
   } catch (error) {
-    console.error("Get all pickups error:", error);
-    res.status(500).json({ message: "Server error fetching pickups" });
+    console.error("getAllPickups error:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Approve or Reject pickup (Supervisor/Admin)
+/* ==========================================================
+   4) UPDATE PICKUP STATUS (Supervisor/Admin)
+   Body: { status: "APPROVED" | "REJECTED" | "PENDING" }
+========================================================== */
 export const updatePickupStatus = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parseIntSafe(req.params.id);
+    if (id === null) return res.status(400).json({ message: "Invalid pickup id" });
+
     const { status } = req.body;
-
-    if (!['APPROVED', 'REJECTED', 'PENDING'].includes(status)) {
-      return res.status(400).json({ message: "Invalid status. Use APPROVED, REJECTED, or PENDING." });
+    if (!status || !["APPROVED", "REJECTED", "PENDING"].includes(status)) {
+      return res.status(400).json({ message: "Invalid status. Use APPROVED, REJECTED or PENDING" });
     }
 
-    // Check if pickup exists
-    const existingPickup = await prisma.pickup.findUnique({
-      where: { id: parseInt(id) }
-    });
+    const existing = await prisma.pickup.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ message: "Pickup not found" });
 
-    if (!existingPickup) {
-      return res.status(404).json({ message: "Pickup not found" });
-    }
-
-    const pickup = await prisma.pickup.update({
-      where: { id: parseInt(id) },
+    const updated = await prisma.pickup.update({
+      where: { id },
       data: { status }
     });
 
-    res.json({ message: `Pickup ${status.toLowerCase()}`, pickup });
+    return res.json({ message: `Pickup ${status.toLowerCase()}`, pickup: updated });
   } catch (error) {
-    console.error("Update pickup status error:", error);
-    
-    // Handle Prisma errors
-    if (error.code === 'P2025') {
-      return res.status(404).json({ message: "Pickup not found" });
-    }
-    
-    res.status(500).json({ message: "Server error updating pickup" });
+    console.error("updatePickupStatus error:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Update pickup (Staff only, only if PENDING)
+/* ==========================================================
+   5) UPDATE OWN PICKUP (STAFF) - only when status=PENDING
+   Accepts body fields to update (category, weight, latitude, longitude, image replacement)
+   If req.file present, upload and replace imageUrl.
+========================================================== */
 export const updatePickup = async (req, res) => {
   try {
-    const { id } = req.params;
-    const staffId = req.user.id;
-    const { category, weight, latitude, longitude, imageUrl } = req.body;
+    const id = parseIntSafe(req.params.id);
+    if (id === null) return res.status(400).json({ message: "Invalid pickup id" });
 
-    const pickup = await prisma.pickup.findUnique({ where: { id: parseInt(id) } });
+    const staffId = req.user && req.user.id;
+    if (!staffId) return res.status(401).json({ message: "Unauthorized" });
 
-    if (!pickup) {
-      return res.status(404).json({ message: "Pickup not found" });
-    }
+    const existing = await prisma.pickup.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ message: "Pickup not found" });
+    if (existing.staffId !== staffId) return res.status(403).json({ message: "Forbidden" });
+    if (existing.status !== "PENDING") return res.status(400).json({ message: "Only pending pickups can be edited" });
 
-    if (pickup.staffId !== staffId) {
-      return res.status(403).json({ message: "Unauthorized to update this pickup" });
-    }
-
-    if (pickup.status !== "PENDING") {
-      return res.status(400).json({ message: "Cannot update processed pickup" });
-    }
-
-    // Prepare update data
     const updateData = {};
-    if (category) updateData.category = category;
-    if (weight) {
-      updateData.weight = parseFloat(weight);
-      updateData.co2Saved = parseFloat(weight) * 0.5; // Recalculate CO2
-    }
-    if (latitude) updateData.latitude = parseFloat(latitude);
-    if (longitude) updateData.longitude = parseFloat(longitude);
-    if (imageUrl !== undefined) updateData.imageUrl = imageUrl; // Allow null
+    const { category, weight, latitude, longitude } = req.body;
 
-    const updatedPickup = await prisma.pickup.update({
-      where: { id: parseInt(id) },
+    if (category) updateData.category = category;
+    if (weight !== undefined) {
+      const f = parseFloatSafe(weight);
+      if (f === null) return res.status(400).json({ message: "Invalid weight" });
+      updateData.weight = f;
+      updateData.co2Saved = f * (CO2_FACTOR[(category || existing.category).toUpperCase()] ?? CO2_FACTOR.OTHER);
+    }
+    if (latitude !== undefined) updateData.latitude = parseFloatSafe(latitude);
+    if (longitude !== undefined) updateData.longitude = parseFloatSafe(longitude);
+
+    // If a new image file is uploaded, replace imageUrl
+    if (req.file && req.file.buffer) {
+      try {
+        const upload = await uploadToCloudinary(req.file.buffer);
+        updateData.imageUrl = upload.secure_url;
+      } catch (err) {
+        console.error("Cloudinary upload in update failed:", err);
+        return res.status(500).json({ message: "Image upload failed" });
+      }
+    } else if (req.body.imageUrl) {
+        // If client uploaded image and sent URL
+        updateData.imageUrl = req.body.imageUrl;
+    }
+
+    const updated = await prisma.pickup.update({
+      where: { id },
       data: updateData
     });
 
-    res.json({ message: "Pickup updated successfully", pickup: updatedPickup });
+    return res.json({ message: "Pickup updated", pickup: updated });
   } catch (error) {
-    console.error("Update pickup error:", error);
-    
-    if (error.code === 'P2025') {
-      return res.status(404).json({ message: "Pickup not found" });
-    }
-    
-    res.status(500).json({ message: "Server error updating pickup" });
+    console.error("updatePickup error:", error);
+    return res.status(500).json({ message: "Internal server error" });
   }
 };
 
-// Delete pickup (Staff only, only if PENDING)
+/* ==========================================================
+   6) DELETE PICKUP (STAFF) - only when status=PENDING
+========================================================== */
 export const deletePickup = async (req, res) => {
   try {
-    const { id } = req.params;
+    const id = parseIntSafe(req.params.id);
+    if (id === null) return res.status(400).json({ message: "Invalid pickup id" });
+
+    const staffId = req.user && req.user.id;
+    if (!staffId) return res.status(401).json({ message: "Unauthorized" });
+
+    const existing = await prisma.pickup.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ message: "Pickup not found" });
+    if (existing.staffId !== staffId) return res.status(403).json({ message: "Forbidden" });
+    if (existing.status !== "PENDING") return res.status(400).json({ message: "Only pending pickups can be deleted" });
+
+    await prisma.pickup.delete({ where: { id } });
+    return res.json({ message: "Pickup deleted successfully" });
+  } catch (error) {
+    console.error("deletePickup error:", error);
+    return res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+export const getPickupById = async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
     const staffId = req.user.id;
 
-    const pickup = await prisma.pickup.findUnique({ where: { id: parseInt(id) } });
+    const pickup = await prisma.pickup.findUnique({ where: { id } });
 
     if (!pickup) {
       return res.status(404).json({ message: "Pickup not found" });
     }
 
+    // Staff can only access their own pickups
     if (pickup.staffId !== staffId) {
-      return res.status(403).json({ message: "Unauthorized to delete this pickup" });
+      return res.status(403).json({ message: "Forbidden" });
     }
 
-    if (pickup.status !== "PENDING") {
-      return res.status(400).json({ message: "Cannot delete processed pickup" });
-    }
-
-    await prisma.pickup.delete({ where: { id: parseInt(id) } });
-
-    res.json({ message: "Pickup deleted successfully" });
+    res.json(pickup);
   } catch (error) {
-    console.error("Delete pickup error:", error);
-    res.status(500).json({ message: "Server error deleting pickup" });
+    console.error("Get pickup by ID error:", error);
+    return res.status(500).json({ message: "Failed to load pickup" });
   }
 };
 

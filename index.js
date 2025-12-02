@@ -23,6 +23,7 @@ const corsOptions = {
     const allowedOrigins = [
       "http://localhost:3000",
       "https://vatavaranapp.vercel.app",
+      "http://localhost:3001"
     ];
     
     // Allow requests with no origin (like mobile apps or curl requests)
