@@ -18,28 +18,38 @@ const app = express();
 const prisma = new PrismaClient();
 
 // CORS Configuration
-const corsOptions = {
-  origin: function (origin, callback) {
-    const allowedOrigins = [
-      "http://localhost:3000",
-      "https://vatavaranapp.vercel.app",
-      "http://localhost:3001"
-    ];
-    
-    // Allow requests with no origin (like mobile apps or curl requests)
+const allowedOrigins = [
+  "http://localhost:3000",
+  "http://localhost:3001",
+  "https://vatavaranapp.vercel.app",
+  "https://vatavaranapp.vercel.app/", 
+  "https://*.vercel.app",
+  "https://vatavaran-backend.onrender.com"
+];
+
+app.use(cors({
+  origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1) {
+
+    if (allowedOrigins.some(o =>
+      o.includes("*")
+        ? new RegExp(o.replace("*", ".*")).test(origin)
+        : o === origin
+    )) {
       callback(null, true);
     } else {
-      console.log("Blocked origin:", origin);
+      console.log("❌ BLOCKED ORIGIN:", origin);
       callback(null, false);
     }
   },
   credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-};
+  methods: "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+  allowedHeaders: "Content-Type, Authorization",
+}));
+
+// Explicitly handle OPTIONS
+app.options("*", cors());
+
 
 app.use(cors(corsOptions));
 
