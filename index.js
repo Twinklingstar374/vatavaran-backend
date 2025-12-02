@@ -1,5 +1,3 @@
-// backend/index.js (ESM Compatible)
-
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -17,63 +15,56 @@ const JWT_SECRET = process.env.JWT_SECRET || "YOUR_SECRET_KEY";
 const app = express();
 const prisma = new PrismaClient();
 
-// CORS Configuration
+/* -------------------- CORS FIX -------------------- */
+
 const allowedOrigins = [
   "http://localhost:3000",
   "http://localhost:3001",
   "https://vatavaranapp.vercel.app",
-  "https://*.vercel.app",
   "https://vatavaran-backend.onrender.com"
 ];
 
-// ✅ WORKING CORS MIDDLEWARE — KEEP THIS
-app.use(cors({
+const corsOptions = {
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
 
-    const isAllowed = allowedOrigins.some(o =>
-      o.includes("*")
-        ? new RegExp(o.replace("*", ".*")).test(origin)
-        : o === origin
-    );
-
-    if (isAllowed) callback(null, true);
-    else {
-      console.log("❌ BLOCKED ORIGIN:", origin);
-      callback(null, false);
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
     }
+
+    console.log("❌ BLOCKED ORIGIN:", origin);
+    callback(null, false);
   },
   credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-}));
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+  allowedHeaders: ["Content-Type", Authorization"]
+};
 
-// ❌ REMOVE THIS LINE — IT BREAKS YOUR SERVER
-// app.use(cors(corsOptions));   <---- DELETE THIS
+app.use(cors(corsOptions));
 
-// Body parsing
+/* -------------------- BODY PARSER -------------------- */
+
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Routes
+/* -------------------- ROUTES -------------------- */
+
 app.use("/api/auth", authRouter);
 app.use("/api/pickups", pickupsRouter);
 
-// Health check
+/* -------------------- HEALTH CHECK -------------------- */
+
 app.get("/", (req, res) => {
-  res.json({ success: true, message: "VatavaranTrack API Running" });
+  res.json({ success: true, message: "API running" });
 });
 
-app.get("/health", (req, res) => {
-  res.json({ success: true });
-});
+/* -------------------- NOT FOUND / ERROR HANDLERS -------------------- */
 
-// 404 handler
 app.use(notFoundHandler);
-
-// Global error handler
 app.use(errorHandler);
 
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-});
+/* -------------------- START SERVER -------------------- */
+
+app.listen(PORT, () =>
+  console.log(`🚀 Server running on port ${PORT}`)
+);
