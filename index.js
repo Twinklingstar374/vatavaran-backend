@@ -48,7 +48,7 @@ app.use(cors({
 }));
 
 // Explicitly handle OPTIONS
-app.options("*", cors());
+// app.options("*", cors());
 
 
 app.use(cors(corsOptions));
