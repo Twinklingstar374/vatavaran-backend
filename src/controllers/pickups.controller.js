@@ -118,7 +118,11 @@ export const getMyPickups = async (req, res) => {
       prisma.pickup.count({ where })
     ]);
 
-    return res.json(items);
+    return res.json({
+      pickups: items,
+      totalPages: Math.ceil(total / limit),
+      currentPage: page
+    });
 
   } catch (error) {
     console.error("getMyPickups error:", error);
