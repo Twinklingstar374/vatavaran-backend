@@ -1,6 +1,7 @@
 // controllers/pickups.controller.js
 import prisma from "../services/db.service.js";
 import cloudinary from "../services/cloudinary.service.js";
+import { calculateRewardPoints, updateStaffRewards } from "../services/reward.service.js";
 
 /* ----------------------
    Helpers
@@ -190,6 +191,12 @@ export const getAllPickups = async (req, res) => {
 /* ==========================================================
    4) UPDATE PICKUP STATUS (Supervisor/Admin)
    Body: { status: "APPROVED" | "REJECTED" | "PENDING" }
+   
+   REWARD SYSTEM LOGIC:
+   - When a pickup is APPROVED, staff member earns reward points
+   - Points are calculated based on waste category and weight
+   - NO points are given for PENDING or REJECTED pickups
+   - This ensures rewards are only for verified, quality collections
 ========================================================== */
 export const updatePickupStatus = async (req, res) => {
   try {
@@ -204,10 +211,28 @@ export const updatePickupStatus = async (req, res) => {
     const existing = await prisma.pickup.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ message: "Pickup not found" });
 
+    // Update the pickup status
     const updated = await prisma.pickup.update({
       where: { id },
       data: { status }
     });
+
+    // ✅ REWARD SYSTEM: Grant points ONLY on approval
+    if (status === "APPROVED") {
+      try {
+        // Calculate reward points based on category and weight
+        const rewardPoints = calculateRewardPoints(updated);
+        
+        // Award points to the staff member
+        await updateStaffRewards(updated.staffId, rewardPoints);
+        
+        console.log(`✅ Pickup #${id} approved. Staff #${updated.staffId} earned ${rewardPoints} points!`);
+      } catch (rewardError) {
+        // Log error but don't fail the approval - rewards are secondary to the core workflow
+        console.error("Failed to update rewards:", rewardError);
+        // Continue - the pickup is still approved even if rewards fail
+      }
+    }
 
     return res.json({ message: `Pickup ${status.toLowerCase()}`, pickup: updated });
   } catch (error) {
@@ -232,7 +257,9 @@ export const updatePickup = async (req, res) => {
     const existing = await prisma.pickup.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ message: "Pickup not found" });
     if (existing.staffId !== staffId) return res.status(403).json({ message: "Forbidden" });
-    if (existing.status !== "PENDING") return res.status(400).json({ message: "Only pending pickups can be edited" });
+    if (!["PENDING", "REJECTED"].includes(existing.status)) {
+      return res.status(400).json({ message: "Only pending or rejected pickups can be edited" });
+    }
 
     const updateData = {};
     const { category, weight, latitude, longitude } = req.body;
@@ -246,6 +273,11 @@ export const updatePickup = async (req, res) => {
     }
     if (latitude !== undefined) updateData.latitude = parseFloatSafe(latitude);
     if (longitude !== undefined) updateData.longitude = parseFloatSafe(longitude);
+
+    // If it was rejected, reset to pending for re-review
+    if (existing.status === "REJECTED") {
+      updateData.status = "PENDING";
+    }
 
     // If a new image file is uploaded, replace imageUrl
     if (req.file && req.file.buffer) {
@@ -287,7 +319,9 @@ export const deletePickup = async (req, res) => {
     const existing = await prisma.pickup.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ message: "Pickup not found" });
     if (existing.staffId !== staffId) return res.status(403).json({ message: "Forbidden" });
-    if (existing.status !== "PENDING") return res.status(400).json({ message: "Only pending pickups can be deleted" });
+    if (!["PENDING", "REJECTED"].includes(existing.status)) {
+      return res.status(400).json({ message: "Only pending or rejected pickups can be deleted" });
+    }
 
     await prisma.pickup.delete({ where: { id } });
     return res.json({ message: "Pickup deleted successfully" });

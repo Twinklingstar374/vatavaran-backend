@@ -1,52 +1,64 @@
-// 1. Roles enum
-enum Role {
-  STAFF
-  SUPERVISOR
-  ADMIN
-}
-
 generator client {
   provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  // url      = env("DATABASE_URL")
+  url      = env("DATABASE_URL")
 }
 
-// 2. Staff model (User)
 model Staff {
-  id           Int          @id @default(autoincrement())
+  id           Int      @id @default(autoincrement())
   name         String
-  email        String       @unique
   password     String
-  role         Role         @default(STAFF)
-
+  role         Role     @default(STAFF)
+  rewardPoints Int      @default(0)
+  email        String   @unique
   supervisorId Int?
-  supervisor   Staff?       @relation("StaffHierarchy", fields: [supervisorId], references: [id], onDelete: SetNull)
-  subordinates Staff[]      @relation("StaffHierarchy")
-
   pickups      Pickup[]
+  supervisor   Staff?   @relation("StaffHierarchy", fields: [supervisorId], references: [id])
+  subordinates Staff[]  @relation("StaffHierarchy")
 }
 
-// 3. Pickup Model
 model Pickup {
   id        Int      @id @default(autoincrement())
   staffId   Int
-  staff     Staff    @relation(fields: [staffId], references: [id])
-
   category  String
   weight    Float
   co2Saved  Float
   latitude  Float
   longitude Float
   imageUrl  String?
-  status    String   @default("PENDING") // PENDING, APPROVED, REJECTED
-
+  status    String   @default("PENDING")
   createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  updatedAt DateTime @default(now()) @updatedAt
+  staff     Staff    @relation(fields: [staffId], references: [id])
 
   @@index([status])
   @@index([staffId])
 }
 
+model ContactMessage {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  subject   String
+  message   String
+  createdAt DateTime @default(now())
+}
+
+model ImprovementSuggestion {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String
+  category  String
+  priority  String
+  suggestion String
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  STAFF
+  SUPERVISOR
+  ADMIN
+}

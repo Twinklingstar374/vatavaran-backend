@@ -49,7 +49,7 @@ export async function registerUser(req, res) {
         return res.status(201).json({
             message: 'User registered successfully',
             token,
-            user: { id: newUser.id, email: newUser.email, role: newUser.role, name: newUser.name }
+            user: { id: newUser.id, email: newUser.email, role: newUser.role, name: newUser.name, rewardPoints: newUser.rewardPoints || 0 }
         });
     } catch (error) {
         console.error('Registration error:', error);
@@ -88,7 +88,7 @@ export async function createUser(req, res) {
 
         return res.status(201).json({
             message: 'User created successfully',
-            user: { id: newUser.id, email: newUser.email, role: newUser.role, name: newUser.name }
+            user: { id: newUser.id, email: newUser.email, role: newUser.role, name: newUser.name, rewardPoints: newUser.rewardPoints || 0 }
         });
     } catch (error) {
         console.error('Create user error:', error);
@@ -125,7 +125,7 @@ export async function loginUser(req, res) {
         return res.status(200).json({
             message: 'Login successful',
             token,
-            user: { id: user.id, email: user.email, name: user.name, role: user.role }
+            user: { id: user.id, email: user.email, name: user.name, role: user.role, rewardPoints: user.rewardPoints || 0 }
         });
     } catch (error) {
         console.error('Login error:', error);
