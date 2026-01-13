@@ -5,11 +5,11 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 
 
-const JWT_SECRET = process.env.JWT_SECRET || 'your-very-strong-and-secret-key-replace-this-in-production';
 const SALT_ROUNDS = 10;
 
 
 function generateToken(user) {
+    const JWT_SECRET = process.env.JWT_SECRET || 'vatavaran_fallback_secret_2024';
     const payload = { id: user.id, email: user.email, role: user.role };
     
     return jwt.sign(payload, JWT_SECRET, { expiresIn: '24h' });
@@ -130,5 +130,24 @@ export async function loginUser(req, res) {
     } catch (error) {
         console.error('Login error:', error);
         return res.status(500).json({ message: 'Internal server error during login.' });
+    }
+}
+
+export async function getCurrentUser(req, res) {
+    try {
+        const userId = req.user.id;
+        const user = await prisma.staff.findUnique({
+            where: { id: userId },
+            select: { id: true, name: true, email: true, role: true, rewardPoints: true }
+        });
+
+        if (!user) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        res.json(user);
+    } catch (error) {
+        console.error('Get current user error:', error);
+        res.status(500).json({ message: 'Internal server error' });
     }
 }

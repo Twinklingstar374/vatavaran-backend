@@ -1,9 +1,6 @@
 import jwt from "jsonwebtoken";
 
 
-const JWT_SECRET = process.env.JWT_SECRET || "YOUR_SECRET_KEY";
-
-
 export const verifyToken = (req, res, next) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
@@ -16,6 +13,7 @@ export const verifyToken = (req, res, next) => {
   }
 
   try {
+    const JWT_SECRET = process.env.JWT_SECRET || "vatavaran_fallback_secret_2024";
     const decoded = jwt.verify(token, JWT_SECRET);
     req.user = decoded;
     next();

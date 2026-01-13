@@ -8,6 +8,7 @@ import pickupsRouter from "./src/routes/pickups.routes.js";
 import contactRouter from "./src/routes/contact.routes.js";
 import improvementRouter from "./src/routes/improvement.routes.js";
 import aiRouter from "./src/routes/ai.routes.js";
+import uploadRouter from "./src/routes/upload.routes.js";
 import { errorHandler, notFoundHandler } from "./src/middleware/error.middleware.js";
 
 dotenv.config();
@@ -58,6 +59,7 @@ app.use("/api/pickups", pickupsRouter);
 app.use("/api/contact", contactRouter);
 app.use("/api/improvement", improvementRouter);
 app.use("/api/ai", aiRouter);
+app.use("/api/upload", uploadRouter);
 
 /* -------------------- HEALTH CHECK -------------------- */
 

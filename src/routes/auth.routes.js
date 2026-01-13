@@ -1,7 +1,7 @@
 // backend/src/routes/auth.routes.js
 
 import express from 'express';
-import { registerUser, loginUser, createUser } from '../controllers/auth.controller.js';
+import { registerUser, loginUser, createUser, getCurrentUser } from '../controllers/auth.controller.js';
 import { verifyToken, authorizeRoles } from '../middleware/auth.middleware.js';
 
 const authRouter = express.Router();
@@ -10,7 +10,11 @@ const authRouter = express.Router();
 authRouter.post('/signup', registerUser);
 
 // POST /api/auth/login - User login
+// POST /api/auth/login - User login
 authRouter.post('/login', loginUser);
+
+// GET /api/auth/me - Get current user (Private)
+authRouter.get('/me', verifyToken, getCurrentUser);
 
 // POST /api/auth/create-user - Admin create user (Protected, Admin only)
 authRouter.post('/create-user', verifyToken, authorizeRoles('ADMIN'), createUser);

@@ -69,7 +69,7 @@ export const createPickup = async (req, res) => {
 
     const pickup = await prisma.pickup.create({
       data: {
-        staffId,
+        staffId: parseInt(staffId),
         category,
         weight: numericWeight,
         co2Saved,
@@ -93,7 +93,7 @@ export const createPickup = async (req, res) => {
 ========================================================== */
 export const getMyPickups = async (req, res) => {
   try {
-    const staffId = req.user && req.user.id;
+    const staffId = req.user && parseInt(req.user.id);
     if (!staffId) return res.status(401).json({ message: "Unauthorized" });
 
     const page = parseIntSafe(req.query.page, 1) || 1;
@@ -107,6 +107,8 @@ export const getMyPickups = async (req, res) => {
 
     if (req.query.category) where.category = { equals: req.query.category };
     if (req.query.status) where.status = req.query.status;
+
+    console.log(`[DEBUG] getMyPickups: staffId=${staffId}, skip=${skip}, limit=${limit}, sort=${sortBy}:${order}`);
 
     const [items, total] = await Promise.all([
       prisma.pickup.findMany({
@@ -126,7 +128,7 @@ export const getMyPickups = async (req, res) => {
 
   } catch (error) {
     console.error("getMyPickups error:", error);
-    return res.status(500).json({ message: "Internal server error" });
+    return res.status(500).json({ message: "Internal server error", error: error.message });
   }
 };
 
